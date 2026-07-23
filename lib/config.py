@@ -22,7 +22,7 @@ OUTPUT_DIR = ROOT_DIR / "output"
 MODELS_DIR = ROOT_DIR / "models"
 STATIC_DIR = ROOT_DIR / "static"
 
-# large-v3 は初回のみ約1.5GBのダウンロードが発生する。
+# large-v3-turbo は初回のみ約1.5GBのダウンロードが発生する。
 # HF_HOME を models/ に固定してキャッシュ先を安定させる。
 os.environ.setdefault("HF_HOME", str(MODELS_DIR))
 
@@ -35,13 +35,26 @@ def ensure_dirs() -> None:
 
 # ── Whisper 設定 ──────────────────────────────────────────────
 def whisper_model_name() -> str:
-    """使用する faster-whisper モデルサイズ。既定 large-v3。"""
-    return os.environ.get("WHISPER_MODEL", "large-v3")
+    """使用する faster-whisper モデルサイズ。既定 large-v3-turbo。"""
+    return os.environ.get("WHISPER_MODEL", "large-v3-turbo")
 
 
 def whisper_device() -> str:
     """推論デバイス。auto なら CUDA があれば GPU、なければ CPU。"""
     return os.environ.get("WHISPER_DEVICE", "auto")
+
+
+def whisper_cpu_threads() -> int:
+    """CPU 推論時のスレッド数。既定は論理コア数（最大 8）。"""
+    env = os.environ.get("WHISPER_CPU_THREADS")
+    if env:
+        return int(env)
+    return min(os.cpu_count() or 4, 8)
+
+
+def whisper_batch_size() -> int:
+    """BatchedInferencePipeline のバッチサイズ。既定 8。"""
+    return int(os.environ.get("WHISPER_BATCH_SIZE", "8"))
 
 
 # ── Claude 設定 ───────────────────────────────────────────────

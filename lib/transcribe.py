@@ -14,9 +14,10 @@ from typing import Callable, Iterable
 
 from . import config
 
-# モジュールレベルで WhisperModel をキャッシュ（プロセス内で再利用）
+# モジュールレベルで WhisperModel / BatchedInferencePipeline をキャッシュ（プロセス内で再利用）
 _model = None
 _model_key: tuple[str, str] | None = None
+_pipeline = None
 
 
 def _get_model():
@@ -38,9 +39,21 @@ def _get_model():
         device=device,
         compute_type=compute_type,
         download_root=str(config.MODELS_DIR),
+        cpu_threads=config.whisper_cpu_threads(),
     )
     _model_key = key
     return _model
+
+
+def _get_pipeline():
+    """設定に応じた BatchedInferencePipeline を返す（初回のみ生成）。"""
+    global _pipeline, _model_key
+    from faster_whisper import BatchedInferencePipeline
+
+    model = _get_model()
+    if _pipeline is None or _pipeline.model is not model:
+        _pipeline = BatchedInferencePipeline(model)
+    return _pipeline
 
 
 ProgressCb = Callable[[str, dict], None]
@@ -57,15 +70,16 @@ def transcribe_track(
     source は "self"（マイク）または "others"（タブ音声）。
     on_progress は (source, {"end": 秒}) 形式で進捗を通知する。
     """
-    model = _get_model()
+    pipeline = _get_pipeline()
 
     # segments は遅延ジェネレータ。反復して確定させながら進捗を発火する。
-    segments, _info = model.transcribe(
+    segments, _info = pipeline.transcribe(
         str(audio_path),
         language="ja",
         vad_filter=True,
         word_timestamps=True,
         beam_size=5,
+        batch_size=config.whisper_batch_size(),
     )
 
     result: list[dict] = []

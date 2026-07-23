@@ -31,6 +31,46 @@ Ollama を選べば完全ローカルで完結します）。
 - **ffmpeg のインストールは不要**です（faster-whisper が PyAV 同梱の ffmpeg
   ライブラリで WebM/Opus をデコードします）。
 
+### 推奨スペック
+
+文字起こし（faster-whisper）はローカル CPU（Mac は常に CPU、Windows は GPU があれば
+高速化可）で動くため、マシンスペックが処理時間に直結します。以下は実測
+（Apple M4 Max・16コア・64GB、`WHISPER_MODEL=large-v3-turbo` + バッチ推論）を基準にした目安です。
+
+| | Claude で議事録生成 | Ollama で議事録生成もローカル（`gemma4:12b` 相当） |
+| --- | --- | --- |
+| CPU | 8コア/16スレッド以上（Intel Core i7 / Ryzen 7 以上、Apple M2/M3/M4系） | 同左 |
+| RAM | 16GB 以上 | **32GB 推奨** |
+| GPU | 不要（Windows は NVIDIA GPU があれば `WHISPER_DEVICE=cuda` で文字起こしを高速化可） | Windows: NVIDIA GPU（VRAM 12GB 以上推奨）／Mac: Apple Silicon なら Ollama が自動で GPU（Metal）を使用 |
+| ディスク | SSD 空き 50GB 以上 | 同左 |
+
+内訳（実測値）:
+
+- 文字起こし（faster-whisper, large-v3-turbo, `cpu_threads=8` / `batch_size=8`）: 単一トラック処理時のピークRAM 約 6.2GB。1時間の音声（2トラック）を約6分で処理（旧 `large-v3` の逐次デコードでは同条件で約2時間）。
+- ローカル議事録生成（Ollama, `gemma4:12b`）: ロード時のメモリ/VRAM 約 8.9GB。
+- 文字起こしと議事録生成は逐次実行のため、アプリ全体のピークは両者の**大きい方**（約9GB）で見積もれば十分（合算不要）。
+- 会議1時間あたりのディスク消費: 音声2トラックで約110MB、`screen.webm`（画面録画）込みで約830MB。
+
+> 実測機はハイエンド（M4 Max）のため、処理時間はこれより低スペックな機種では伸びます。
+> RAM・ディスクの目安はおおむね機種によらず妥当です。
+
+### 推奨スペックに届かない場合の調整
+
+- **文字起こしが遅い / CPU使用率が張り付く**: `WHISPER_CPU_THREADS` を実コア数以下に
+  下げる（多すぎるとメモリ帯域律速でむしろ悪化することがあります）。それでも遅い場合は
+  `WHISPER_MODEL=medium` や `small` にダウンシフトすると大幅に軽くなります（精度は低下）。
+- **RAMが少ない（8〜16GB程度）**: `WHISPER_BATCH_SIZE` を `4` や `2` に下げるとメモリ
+  消費を抑えられます（処理は多少遅くなります）。Ollama を使う場合は `gemma4:12b` より
+  小さいモデル（7B前後など）に切り替えるか、議事録生成は Claude（クラウド）に任せて
+  ローカルの負荷を文字起こしのみに絞るのがおすすめです。
+- **Windows で GPU が無い / VRAM が足りない**: 文字起こしは `WHISPER_DEVICE=cpu` に
+  固定して問題ありません（`auto` のままでも GPU が使えなければ自動で CPU 実行）。
+  Ollama のローカル議事録生成は CPU 実行になり `gemma4:12b` クラスだと生成が遅くなるため、
+  即時性が欲しい場合は Claude プロバイダを使う方が現実的です。
+- **ディスク容量が厳しい**: `screen.webm`（画面録画）が容量の大半を占めるため、録画が
+  不要なら保存後に削除する運用にすると音声・議事録のみで会議1時間あたり約110MBまで
+  抑えられます。
+
 ## セットアップ
 
 ```bash
@@ -49,8 +89,14 @@ cp .env.local.example .env.local
 ```
 
 - **Claude を使う場合**: `.env.local` に `ANTHROPIC_API_KEY` を設定します。
-- **Ollama を使う場合**: ローカルで `ollama serve` を起動しておきます。
-  UI に自動でモデル一覧が表示されます。
+- **Ollama を使う場合**:
+  1. [Ollama](https://ollama.com/) をインストールする（Mac: `brew install ollama`、
+     Windows: 公式サイトからインストーラを取得）。
+  2. 議事録生成用のモデルを取得する（動作確認済み: `gemma4:12b`。他のモデルでも可）。
+     ```bash
+     ollama pull gemma4:12b
+     ```
+  3. `ollama serve` でローカルサーバを起動しておく。UI に自動でモデル一覧が表示される。
 
 ## 起動
 
@@ -144,15 +190,18 @@ Web版とは別に、**Chrome/Edge 拡張機能版**も同梱しています（`
 | `CLAUDE_MODEL` | `claude-opus-4-8` | 使用する Claude モデル。 |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama のエンドポイント。 |
 | `OLLAMA_MODEL` | 一覧の先頭 | Ollama の既定モデル。 |
-| `WHISPER_MODEL` | `large-v3` | 文字起こしモデル。`medium` / `large-v3-turbo` で高速化可。 |
+| `WHISPER_MODEL` | `large-v3-turbo` | 文字起こしモデル。`medium` / `large-v3` などに変更可。 |
 | `WHISPER_DEVICE` | `auto` | `auto`（CUDA があれば GPU）/ `cpu` / `cuda`。 |
+| `WHISPER_CPU_THREADS` | コア数（最大8） | CPU 推論時のスレッド数。 |
+| `WHISPER_BATCH_SIZE` | `8` | バッチ推論（BatchedInferencePipeline）のバッチサイズ。 |
 
 ## パフォーマンスの注意
 
-- **初回のモデルダウンロード**: 既定の `large-v3` は約 1.5GB を `models/` に一度だけ
+- **初回のモデルダウンロード**: 既定の `large-v3-turbo` は約 1.5GB を `models/` に一度だけ
   ダウンロードします（初回は時間がかかります）。
 - **文字起こし速度**: CPU int8 では実時間かそれ以上かかることがあります。速度が
-  必要な場合は `WHISPER_MODEL=large-v3-turbo` などにダウンシフトしてください。
+  必要な場合は `WHISPER_MODEL=medium` などにダウンシフトしてください。バッチ推論
+  （`BatchedInferencePipeline`）により大幅高速化されており、`WHISPER_BATCH_SIZE` で調整可。
 - **長時間会議**: クライアント側でチャンク化し、サーバ側で VAD フィルタを用いて
   メモリを抑えています。
 
