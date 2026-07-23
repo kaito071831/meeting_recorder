@@ -32,7 +32,9 @@
 - 画面録画: 破棄していた `getDisplayMedia` の映像トラックを保持し、3つ目の
   MediaRecorder で `displayStream`（映像＋タブ音声）を `screen.webm` として録画・保存
   （参照用）。文字起こし・議事録は `mic.webm` / `tab.webm` のみ使用し無変更。
-  自分のマイク音声は録画動画には含めない。動画は大きくなる点に注意。
+  録画動画にはマイク＋タブ音声をミックスして合成する（WebAudio
+  `MediaStreamAudioDestinationNode`）ため、映像＋全員の音声が1本にまとまる。
+  文字起こしは `mic.webm` / `tab.webm` のみで無変更。動画は大きくなる点に注意。
 
 ## Claude 呼び出しの注意（重要）
 

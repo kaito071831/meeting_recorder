@@ -1,7 +1,8 @@
 // キャプチャUI: getDisplayMedia(タブ映像＋タブ音声=相手) + getUserMedia(マイク=自分) を
 // 3つの MediaRecorder で別々に録音し、停止時にアップロードして SSE で進捗表示する。
-// 話者分離のため音声トラックは合成しない（ソースベース）。共有タブの映像は
-// タブ音声とあわせて画面録画（screen.webm、参照用）として保存する。
+// 話者分離のため文字起こし用の音声トラックは合成しない（ソースベース）。共有タブの
+// 映像は、マイク＋タブ音声をミックスした音声とあわせて画面録画（screen.webm、参照用・
+// 映像＋全音声）として保存する。
 
 "use strict";
 
@@ -127,6 +128,7 @@ let recorders = [];
 let chunks = { mic: [], tab: [], screen: [] };
 let streams = [];
 let meterStops = [];
+let mixCtx = null; // 録画用のミックス AudioContext（stop で close）
 let timerId = null;
 let startedAt = 0;
 
@@ -229,10 +231,33 @@ async function start() {
     if (e.data && e.data.size > 0) chunks.tab.push(e.data);
   };
 
-  // 画面録画（映像＋タブ音声）
+  // 画面録画（映像＋ミックス音声＝タブ音声＋自分マイク）。
+  // WebAudio の MediaStreamAudioDestinationNode でマイク＋タブ音声をミックスし、
+  // 共有タブの映像トラックと束ねた新しいストリームを録画ソースにする。
+  // ミックス生成に失敗したら従来どおり displayStream（映像＋タブ音声のみ）へフォールバック。
   const videoMime = pickVideoMime();
   const screenOpts = videoMime ? { mimeType: videoMime } : {};
-  const screenRec = new MediaRecorder(displayStream, screenOpts);
+  let recordStream = displayStream;
+  try {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    mixCtx = new AudioCtx();
+    const mixDest = mixCtx.createMediaStreamDestination();
+    mixCtx.createMediaStreamSource(micStream).connect(mixDest);
+    mixCtx.createMediaStreamSource(tabStream).connect(mixDest);
+    if (mixCtx.state === "suspended") mixCtx.resume(); // 取り込みのため running に
+    recordStream = new MediaStream([
+      ...displayStream.getVideoTracks(),
+      ...mixDest.stream.getAudioTracks(),
+    ]);
+  } catch (e) {
+    // ミックス失敗時は映像＋タブ音声のみで録画（最低限、従来同等）
+    if (mixCtx) {
+      mixCtx.close().catch(() => {});
+      mixCtx = null;
+    }
+    recordStream = displayStream;
+  }
+  const screenRec = new MediaRecorder(recordStream, screenOpts);
   screenRec.ondataavailable = (e) => {
     if (e.data && e.data.size > 0) chunks.screen.push(e.data);
   };
@@ -277,6 +302,10 @@ async function stop() {
   // ストリーム・メーターの後始末
   meterStops.forEach((fn) => fn());
   streams.forEach((s) => s.getTracks().forEach((t) => t.stop()));
+  if (mixCtx) {
+    mixCtx.close().catch(() => {});
+    mixCtx = null;
+  }
 
   const micBlob = new Blob(chunks.mic, { type: "audio/webm" });
   const tabBlob = new Blob(chunks.tab, { type: "audio/webm" });
