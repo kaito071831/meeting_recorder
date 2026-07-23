@@ -1,0 +1,53 @@
+# AGENTS.md — meeting_recorder
+
+オンライン会議（ブラウザ版 Teams / Zoom / Google Meet）を対象に、
+会議音声を録音 → 文字起こし → 議事録生成 するローカル Web アプリ。
+
+## スタック・規約
+
+- Python + FastAPI（`app.py` がエントリ）。`.venv` + `requirements.txt` + `setup.sh`。
+- 文字起こしはローカル `faster-whisper`（オフライン・機密保持、日本語）。会議後の一括処理。
+- 議事録生成は Claude（Anthropic SDK, `claude-opus-4-8`）と ローカル Ollama を実行時に選択可能。
+- クロスプラットフォーム（Mac / Windows）。仮想オーディオデバイス等の OS 依存セットアップは不要。
+- ドキュメント・UI・コメントは日本語。
+
+## 構成
+
+- `app.py` — 静的配信 + API（`/api/providers`, `/api/meetings`, `.../process`(SSE), `.../minutes`, `.../transcript`）
+- `lib/config.py` — `.env.local` 読込・パス解決・プロバイダ設定
+- `lib/transcribe.py` — faster-whisper ラッパ（トラック別・逐次・モデル再利用）
+- `lib/merge.py` — 時系列マージ + 話者ラベル（自分 / 相手・参加者）
+- `lib/minutes.py` — プロンプト組立（要約 / 決定事項 / ToDo表）+ 生成オーケストレーション
+- `lib/providers/` — `MinutesProvider` ABC + `claude.py` / `ollama.py` + ファクトリ
+- `lib/storage.py` — 会議ごとの出力パス命名・保存（Windows 禁止文字を除去）
+- `static/` — キャプチャUI（`getDisplayMedia`＋`getUserMedia` の2トラック音声録音
+  ＋共有タブの画面録画 `screen.webm`）
+
+## 音声取込の要点
+
+- 会議はブラウザ版で実施。タブ音声（相手）= `getDisplayMedia({video:true, audio:true})`、
+  マイク（自分）= `getUserMedia`。話者分離のため2トラックを合成せず別々に録音する。
+- Chrome 制約: `getDisplayMedia` の音声取得には `video:true` が必須。取得後 video は `stop()`。
+- Chrome / Edge 対象。macOS はタブ音声のみ（本用途で十分）。
+- 画面録画: 破棄していた `getDisplayMedia` の映像トラックを保持し、3つ目の
+  MediaRecorder で `displayStream`（映像＋タブ音声）を `screen.webm` として録画・保存
+  （参照用）。文字起こし・議事録は `mic.webm` / `tab.webm` のみ使用し無変更。
+  自分のマイク音声は録画動画には含めない。動画は大きくなる点に注意。
+
+## Claude 呼び出しの注意（重要）
+
+- `messages.create` / `messages.stream` で `max_tokens=16000` 程度、
+  `thinking={"type":"adaptive"}`、`output_config={"effort":"high"}`。
+- `temperature` / `budget_tokens` は**渡さない**（Opus 4.8 で 400 エラー）。
+- 長文トランスクリプトはストリーミングして `get_final_message()` で確定する。
+- `anthropic.Anthropic()` は環境から `ANTHROPIC_API_KEY` を読む。
+
+## 技術的前提
+
+- ffmpeg CLI は不要。faster-whisper は PyAV（`av`、ffmpeg ライブラリ同梱 wheel）で
+  WebM/Opus をデコードするため PATH 上の ffmpeg に依存しない。
+
+## 開発コマンド
+
+- セットアップ: `bash setup.sh`
+- 起動: `.venv/bin/uvicorn app:app --port 8000`

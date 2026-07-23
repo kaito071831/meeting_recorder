@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>会議録音・議事録ツール</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="app">
+      <h1>オンライン会議 録音・文字起こし・議事録</h1>
+
+      <p class="note" id="browser-note">
+        Chrome / Edge でご利用ください。会議はブラウザ版（Teams web / Zoom web /
+        Google Meet）で開き、下の「録音開始」で会議タブを共有してください。
+        <strong>共有ダイアログでは会議タブを選び、「タブの音声も共有」に必ずチェック</strong>を入れてください（macOS では特に重要です）。
+        共有したタブの画面は録画され、参照用の動画として保存されます（<strong>録画は音声の数十倍のファイルサイズ</strong>になり得ます）。
+      </p>
+
+      <section class="card">
+        <div class="field">
+          <label for="title">会議タイトル</label>
+          <input id="title" type="text" placeholder="例: 週次定例" />
+        </div>
+
+        <div class="field">
+          <label for="provider">議事録プロバイダ</label>
+          <select id="provider"></select>
+        </div>
+
+        <div class="field">
+          <label for="model">モデル（任意）</label>
+          <select id="model"></select>
+        </div>
+
+        <div class="controls">
+          <button id="start" class="primary">録音開始</button>
+          <button id="stop" class="danger" disabled>停止して処理</button>
+          <span id="timer" class="timer">00:00</span>
+        </div>
+
+        <div class="meters">
+          <div class="meter">
+            <span class="meter-label">自分（マイク）</span>
+            <div class="meter-bar"><div id="mic-level" class="meter-fill"></div></div>
+          </div>
+          <div class="meter">
+            <span class="meter-label">相手・参加者（タブ音声）</span>
+            <div class="meter-bar"><div id="tab-level" class="meter-fill"></div></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card status-card">
+        <h2>進捗</h2>
+        <ul id="status-list" class="status-list"></ul>
+      </section>
+
+      <section class="card" id="result-card" hidden>
+        <div class="result-header">
+          <h2>議事録</h2>
+          <div>
+            <button id="download-minutes">議事録をダウンロード</button>
+            <button id="download-transcript">全文をダウンロード</button>
+            <a id="download-screen" class="button-link" download hidden>録画をダウンロード</a>
+          </div>
+        </div>
+        <pre id="minutes-output" class="output"></pre>
+      </section>
+    </main>
+
+    <script src="/static/capture.js"></script>
+  </body>
+</html>

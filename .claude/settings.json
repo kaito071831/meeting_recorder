@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Read",
+      "Write",
+      "Edit",
+      "Glob",
+      "Grep",
+      "Bash(.venv/bin/python3 *)",
+      "Bash(.venv/bin/uvicorn *)",
+      "Bash(.venv/bin/pip *)",
+      "Bash(ls *)",
+      "Bash(mkdir *)"
+    ],
+    "deny": []
+  }
+}
