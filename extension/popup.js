@@ -1,0 +1,249 @@
+// popup.js — 操作 UI。
+// static/index.html + capture.js の UI 部分を縮約したもの。録音・処理の実体は
+// background（状態集約）＋ offscreen（録音）にあり、popup はその状態を表示・操作する
+// だけ。popup は開閉するため、状態は毎回 background から取得して復元する。
+
+"use strict";
+
+const BACKEND = "http://localhost:8000";
+
+const els = {
+  title: document.getElementById("title"),
+  provider: document.getElementById("provider"),
+  model: document.getElementById("model"),
+  start: document.getElementById("start"),
+  stop: document.getElementById("stop"),
+  timer: document.getElementById("timer"),
+  statusList: document.getElementById("status-list"),
+  resultCard: document.getElementById("result-card"),
+  minutesOutput: document.getElementById("minutes-output"),
+  downloadMinutes: document.getElementById("download-minutes"),
+  downloadTranscript: document.getElementById("download-transcript"),
+  downloadScreen: document.getElementById("download-screen"),
+  permNote: document.getElementById("perm-note"),
+  openPermission: document.getElementById("open-permission"),
+};
+
+// ── 進捗ラベル（capture.js と同一）────────────────────────
+const STAGE_LABELS = {
+  uploaded: "アップロード完了",
+  transcribing_mic: "文字起こし中（自分／マイク）",
+  transcribing_tab: "文字起こし中（相手・参加者／タブ音声）",
+  merging: "時系列マージ中",
+  generating_minutes: "議事録を生成中",
+  done: "完了",
+};
+
+// ── background との通信 ────────────────────────────────────
+function sendBg(type, extra) {
+  return chrome.runtime.sendMessage({ target: "background", type, ...extra });
+}
+
+// ── プロバイダ一覧の読込 ──────────────────────────────────
+let providersInfo = { claude: false, ollama: [] };
+
+async function loadProviders() {
+  try {
+    const resp = await fetch(`${BACKEND}/api/providers`);
+    providersInfo = await resp.json();
+  } catch (e) {
+    providersInfo = { claude: false, ollama: [] };
+    els.title.disabled = true;
+  }
+  els.provider.innerHTML = "";
+  if (providersInfo.claude) {
+    els.provider.appendChild(new Option("Claude (claude-opus-4-8)", "claude"));
+  }
+  if (providersInfo.ollama && providersInfo.ollama.length > 0) {
+    els.provider.appendChild(new Option("Ollama (ローカル)", "ollama"));
+  }
+  if (els.provider.options.length === 0) {
+    els.provider.appendChild(
+      new Option("バックエンド未起動 / プロバイダなし", "")
+    );
+    els.start.disabled = true;
+  }
+  updateModelOptions();
+}
+
+function updateModelOptions() {
+  els.model.innerHTML = "";
+  if (els.provider.value === "ollama") {
+    els.model.disabled = false;
+    for (const m of providersInfo.ollama) {
+      els.model.appendChild(new Option(m, m));
+    }
+  } else {
+    els.model.disabled = true;
+    els.model.appendChild(new Option("(既定)", ""));
+  }
+}
+
+els.provider.addEventListener("change", updateModelOptions);
+
+// ── マイク許可の確認 ──────────────────────────────────────
+async function checkMicPermission() {
+  try {
+    const status = await navigator.permissions.query({ name: "microphone" });
+    els.permNote.hidden = status.state === "granted";
+  } catch (e) {
+    // permissions API 非対応時は未確定として案内を表示
+    els.permNote.hidden = false;
+  }
+}
+
+els.openPermission.addEventListener("click", (e) => {
+  e.preventDefault();
+  chrome.tabs.create({ url: chrome.runtime.getURL("permission.html") });
+});
+
+// ── 状態の描画 ────────────────────────────────────────────
+let timerId = null;
+let currentMeetingId = null;
+let hasScreen = false;
+
+function startTimerFrom(startedAt) {
+  stopTimer();
+  timerId = setInterval(() => {
+    const s = Math.floor((Date.now() - startedAt) / 1000);
+    const mm = String(Math.floor(s / 60)).padStart(2, "0");
+    const ss = String(s % 60).padStart(2, "0");
+    els.timer.textContent = `${mm}:${ss}`;
+  }, 500);
+}
+
+function stopTimer() {
+  if (timerId) clearInterval(timerId);
+  timerId = null;
+}
+
+function renderProgress(events) {
+  els.statusList.innerHTML = "";
+  const lastIdx = events.length - 1;
+  events.forEach((ev, idx) => {
+    if (ev.stage === "error") {
+      const li = document.createElement("li");
+      li.textContent = "エラー: " + (ev.message || "");
+      li.className = "error";
+      els.statusList.appendChild(li);
+      return;
+    }
+    const li = document.createElement("li");
+    let text = STAGE_LABELS[ev.stage] || ev.stage;
+    if (ev.progress && typeof ev.progress.end === "number") {
+      text += `（〜${Math.floor(ev.progress.end)}秒）`;
+    }
+    li.textContent = text;
+    // 最新イベントのみ active、それ以外は done（done ステージは done のまま）
+    li.className = idx === lastIdx && ev.stage !== "done" ? "active" : "done";
+    els.statusList.appendChild(li);
+  });
+}
+
+function render(state) {
+  // ボタン・タイマー
+  if (state.status === "recording") {
+    els.start.disabled = true;
+    els.stop.disabled = false;
+    startTimerFrom(state.startedAt || Date.now());
+  } else if (state.status === "processing") {
+    els.start.disabled = true;
+    els.stop.disabled = true;
+    stopTimer();
+  } else {
+    // idle / done / error
+    els.start.disabled = els.provider.value === "" ? true : false;
+    els.stop.disabled = true;
+    stopTimer();
+  }
+
+  // フォーム値の復元（録音・処理中はユーザーが触れないので同期）
+  if (state.status === "recording" || state.status === "processing") {
+    if (state.title) els.title.value = state.title;
+  }
+
+  // 進捗
+  renderProgress(state.events || []);
+
+  // 結果
+  currentMeetingId = state.meetingId;
+  hasScreen = state.hasScreen;
+  if (state.status === "done" && state.minutesMd) {
+    els.minutesOutput.textContent = state.minutesMd;
+    if (hasScreen && currentMeetingId) {
+      els.downloadScreen.href = `${BACKEND}/api/meetings/${currentMeetingId}/screen`;
+      els.downloadScreen.hidden = false;
+    } else {
+      els.downloadScreen.hidden = true;
+    }
+    els.resultCard.hidden = false;
+  } else {
+    els.resultCard.hidden = true;
+  }
+}
+
+async function refreshState() {
+  try {
+    const resp = await sendBg("get_state");
+    if (resp && resp.ok) render(resp.state);
+  } catch (e) {
+    /* background 未起動時は無視 */
+  }
+}
+
+// background からの状態更新通知
+chrome.runtime.onMessage.addListener((msg) => {
+  if (msg.target === "popup" && msg.type === "state_updated") {
+    render(msg.state);
+  }
+});
+
+// ── 操作 ──────────────────────────────────────────────────
+els.start.addEventListener("click", async () => {
+  els.start.disabled = true;
+  const meta = {
+    title: els.title.value || "",
+    provider: els.provider.value || "claude",
+    model: els.model.value || "",
+  };
+  const resp = await sendBg("start", { meta });
+  if (!resp || !resp.ok) {
+    alert("録音を開始できませんでした: " + ((resp && resp.error) || "不明なエラー"));
+    els.start.disabled = false;
+    return;
+  }
+});
+
+els.stop.addEventListener("click", async () => {
+  els.stop.disabled = true;
+  await sendBg("stop");
+});
+
+// ── ダウンロード ──────────────────────────────────────────
+function download(filename, text) {
+  const blob = new Blob([text], { type: "text/markdown;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+els.downloadMinutes.addEventListener("click", () => {
+  download("minutes.md", els.minutesOutput.textContent);
+});
+
+els.downloadTranscript.addEventListener("click", async () => {
+  if (!currentMeetingId) return;
+  const resp = await fetch(`${BACKEND}/api/meetings/${currentMeetingId}/transcript`);
+  const data = await resp.json();
+  download("transcript.md", data.transcript_md);
+});
+
+// ── 初期化 ────────────────────────────────────────────────
+(async () => {
+  await loadProviders();
+  await checkMicPermission();
+  await refreshState();
+})();

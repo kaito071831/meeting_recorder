@@ -1,0 +1,12 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <title>offscreen recorder</title>
+  </head>
+  <body>
+    <!-- MV3 の service worker では getUserMedia / MediaRecorder が使えないため、
+         実録音・アップロード・SSE 受信はこの offscreen document で行う。UI なし。 -->
+    <script src="offscreen.js"></script>
+  </body>
+</html>

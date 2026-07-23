@@ -16,6 +16,7 @@ import queue
 import threading
 
 from fastapi import FastAPI, Form, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -25,6 +26,16 @@ from lib.providers import available_providers, get_provider
 config.ensure_dirs()
 
 app = FastAPI(title="meeting_recorder")
+
+# 拡張機能版（chrome-extension://<id>）からの fetch / SSE を確実に許可する。
+# host_permissions があれば拡張は CORS を跨げるが、Chrome/Edge のバージョン差の
+# 保険として明示的に許可しておく。同一オリジンの Web版（static/）には影響しない。
+app.add_middleware(
+    CORSMiddleware,
+    allow_origin_regex=r"^(chrome-extension://.*|http://localhost(:\d+)?)$",
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.get("/")

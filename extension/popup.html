@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <title>会議録音・議事録</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body class="popup">
+    <main class="app">
+      <h1>会議 録音・文字起こし・議事録</h1>
+
+      <p class="note" id="backend-note">
+        会議タブをアクティブにしてから「録音開始」を押してください。共有ダイアログや
+        「タブの音声も共有」チェックは不要です。録音中も会議音声は聞こえ続けます。
+      </p>
+
+      <div class="perm-note" id="perm-note" hidden>
+        マイクが未許可です。
+        <a href="#" id="open-permission">マイク許可ページを開く</a>
+        で一度だけ許可してください。
+      </div>
+
+      <section class="card">
+        <div class="field">
+          <label for="title">会議タイトル</label>
+          <input id="title" type="text" placeholder="例: 週次定例" />
+        </div>
+
+        <div class="field">
+          <label for="provider">議事録プロバイダ</label>
+          <select id="provider"></select>
+        </div>
+
+        <div class="field">
+          <label for="model">モデル（任意）</label>
+          <select id="model"></select>
+        </div>
+
+        <div class="controls">
+          <button id="start" class="primary">録音開始</button>
+          <button id="stop" class="danger" disabled>停止して処理</button>
+          <span id="timer" class="timer">00:00</span>
+        </div>
+      </section>
+
+      <section class="card status-card">
+        <h2>進捗</h2>
+        <ul id="status-list" class="status-list"></ul>
+      </section>
+
+      <section class="card" id="result-card" hidden>
+        <div class="result-header">
+          <h2>議事録</h2>
+          <div>
+            <button id="download-minutes">議事録DL</button>
+            <button id="download-transcript">全文DL</button>
+            <a id="download-screen" class="button-link" download hidden>録画DL</a>
+          </div>
+        </div>
+        <pre id="minutes-output" class="output"></pre>
+      </section>
+    </main>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>マイク許可 — 会議録音・議事録</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app">
+      <h1>マイク許可（初回のみ）</h1>
+      <p class="note">
+        録音（offscreen document）からはマイク許可のプロンプトを出せないため、この拡張の
+        ページで一度だけマイク許可を取得します。下のボタンを押し、ブラウザのプロンプトで
+        「許可」を選んでください。以後は popup から録音できます。
+      </p>
+
+      <section class="card">
+        <div class="controls">
+          <button id="grant" class="primary">マイクを許可する</button>
+        </div>
+        <p id="result" class="note" hidden></p>
+      </section>
+    </main>
+    <script src="permission.js"></script>
+  </body>
+</html>
