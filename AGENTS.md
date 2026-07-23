@@ -5,7 +5,8 @@
 
 ## スタック・規約
 
-- Python + FastAPI（`app.py` がエントリ）。`.venv` + `requirements.txt` + `setup.sh`。
+- Python + FastAPI（`app.py` がエントリ）。パッケージ管理は uv
+  （`pyproject.toml` + `uv.lock`）。`setup.sh` は `uv sync` を実行するだけ。
 - 文字起こしはローカル `faster-whisper`（オフライン・機密保持、日本語）。会議後の一括処理。
 - 議事録生成は Claude（Anthropic SDK, `claude-opus-4-8`）と ローカル Ollama を実行時に選択可能。
 - クロスプラットフォーム（Mac / Windows）。仮想オーディオデバイス等の OS 依存セットアップは不要。
@@ -51,5 +52,5 @@
 
 ## 開発コマンド
 
-- セットアップ: `bash setup.sh`
-- 起動: `.venv/bin/uvicorn app:app --port 8000`
+- セットアップ: `bash setup.sh`（= `uv sync`）
+- 起動: `uv run uvicorn app:app --port 8000`

@@ -26,6 +26,8 @@ Ollama を選べば完全ローカルで完結します）。
 - **ブラウザ: Chrome または Edge**（画面共有 API `getDisplayMedia` が必要）。
   Safari / Firefox は非対応です。
 - Python 3.10 以上。
+- パッケージ管理に **[uv](https://docs.astral.sh/uv/)** を使用します
+  （未インストールなら `curl -LsSf https://astral.sh/uv/install.sh | sh`）。
 - **ffmpeg のインストールは不要**です（faster-whisper が PyAV 同梱の ffmpeg
   ライブラリで WebM/Opus をデコードします）。
 
@@ -36,7 +38,8 @@ cd meeting_recorder
 bash setup.sh
 ```
 
-`setup.sh` は `.venv` を作成し、依存関係をインストールして動作確認します。
+`setup.sh` は `uv sync` で `.venv` の作成と依存関係のインストールを行い、動作確認します
+（`pyproject.toml` / `uv.lock` で管理）。`uv sync` を直接実行しても構いません。
 
 続いて環境変数を設定します。
 
@@ -52,7 +55,7 @@ cp .env.local.example .env.local
 ## 起動
 
 ```bash
-.venv/bin/uvicorn app:app --port 8000
+uv run uvicorn app:app --port 8000
 ```
 
 Chrome / Edge で `http://localhost:8000` を開きます。

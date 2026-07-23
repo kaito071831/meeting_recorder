@@ -1,0 +1,19 @@
+[project]
+name = "meeting-recorder"
+version = "0.1.0"
+description = "オンライン会議を録音→文字起こし→議事録生成するローカル Web アプリ"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "python-multipart>=0.0.9",
+    "faster-whisper>=1.0",
+    "anthropic>=0.116",
+    "ollama>=0.3",
+    "httpx>=0.27",
+    "python-dotenv>=1.0",
+]
+
+[tool.uv]
+package = false
