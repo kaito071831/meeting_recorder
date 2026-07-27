@@ -244,3 +244,13 @@ body.popup .output {
 .perm-note a {
   color: var(--primary);
 }
+
+.reset-note {
+  margin: 10px 0 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.reset-note a {
+  color: var(--danger);
+}

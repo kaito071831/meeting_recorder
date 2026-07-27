@@ -211,9 +211,22 @@ async function stopRecording() {
   const tabBlob = new Blob(chunks.tab, { type: "audio/webm" });
   const screenBlob = new Blob(chunks.screen, { type: "video/webm" });
 
-  await uploadAndProcess(micBlob, tabBlob, screenBlob);
+  try {
+    await uploadAndProcess(micBlob, tabBlob, screenBlob);
+  } catch (e) {
+    // SSE 読み取り中の例外等をここで必ず捕捉する。捕捉し損なうと
+    // processing_done が届かず background が processing 状態のまま固まり、
+    // popup の停止／新規録音ボタンが永久に無効化されたままになる。
+    toBackground({
+      type: "progress",
+      event: {
+        stage: "error",
+        message: "処理中にエラーが発生しました: " + (e.message || e),
+      },
+    });
+  }
 
-  // 処理完了。background に offscreen document のクローズを依頼。
+  // 処理完了（成功・失敗いずれでも）。background に offscreen document のクローズを依頼。
   toBackground({ type: "processing_done" });
 }
 
@@ -253,6 +266,9 @@ async function subscribeProgress(meetingId) {
   const resp = await fetch(`${backend}/api/meetings/${meetingId}/process`, {
     method: "POST",
   });
+  if (!resp.ok) {
+    throw new Error(`進捗取得に失敗しました（status ${resp.status}）`);
+  }
   const reader = resp.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";

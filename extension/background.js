@@ -157,6 +157,14 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           sendResponse({ ok: true });
           return;
         }
+        if (msg.type === "reset") {
+          // 何らかの理由で処理が停止・応答不能になった場合の強制リセット。
+          // offscreen document を破棄して状態を idle に戻す。
+          await closeOffscreen().catch(() => {});
+          await setState({ ...INITIAL_STATE });
+          sendResponse({ ok: true });
+          return;
+        }
         sendResponse({ ok: false, error: "unknown message" });
       } catch (e) {
         await setState({ status: "error", error: String(e.message || e) });

@@ -22,6 +22,7 @@ const els = {
   downloadScreen: document.getElementById("download-screen"),
   permNote: document.getElementById("perm-note"),
   openPermission: document.getElementById("open-permission"),
+  forceReset: document.getElementById("force-reset"),
 };
 
 // ── 進捗ラベル（capture.js と同一）────────────────────────
@@ -217,6 +218,15 @@ els.start.addEventListener("click", async () => {
 els.stop.addEventListener("click", async () => {
   els.stop.disabled = true;
   await sendBg("stop");
+});
+
+els.forceReset.addEventListener("click", async (e) => {
+  e.preventDefault();
+  if (!confirm("進捗をリセットします。録音中・処理中の音声や結果は失われます。よろしいですか？")) {
+    return;
+  }
+  await sendBg("reset");
+  await refreshState();
 });
 
 // ── ダウンロード ──────────────────────────────────────────
