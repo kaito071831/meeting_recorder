@@ -173,6 +173,16 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           sendResponse({ ok: true, micMuted: muted });
           return;
         }
+        if (msg.type === "update_result") {
+          // 話者リネーム後の transcript_md・minutes_md を永続状態へ反映する
+          // （popup は開閉のたびに background の状態から再描画するため）。
+          await setState({
+            minutesMd: msg.minutesMd || "",
+            transcriptMd: msg.transcriptMd || "",
+          });
+          sendResponse({ ok: true });
+          return;
+        }
         if (msg.type === "reset") {
           // 何らかの理由で処理が停止・応答不能になった場合の強制リセット。
           // offscreen document を破棄して状態を idle に戻す。

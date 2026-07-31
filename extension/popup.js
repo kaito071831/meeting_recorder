@@ -350,6 +350,11 @@ if (els.saveSpeakers) {
       const data = await resp.json();
       els.minutesOutput.textContent = data.minutes_md;
       els.speakerRenameForm.hidden = true;
+      // background の永続状態にも反映しないと popup 再オープン時に古い議事録へ戻ってしまう
+      await sendBg("update_result", {
+        minutesMd: data.minutes_md,
+        transcriptMd: data.transcript_md,
+      });
     } catch (e) {
       alert(e.message || "話者名の保存に失敗しました");
     } finally {
