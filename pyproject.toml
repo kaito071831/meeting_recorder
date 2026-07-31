@@ -3,7 +3,7 @@ name = "meeting-recorder"
 version = "0.1.0"
 description = "オンライン会議を録音→文字起こし→議事録生成するローカル Web アプリ"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.110",
     "uvicorn[standard]>=0.29",
@@ -13,7 +13,25 @@ dependencies = [
     "ollama>=0.3",
     "httpx>=0.27",
     "python-dotenv>=1.0",
+    "resemblyzer>=0.1.4",
+    "scikit-learn>=1.9",
+    "torch>=2.13,<3",
+    # torch が setuptools を無制約で要求するため 83.0.0 系に解決されがちだが、
+    # webrtcvad（resemblyzer の依存）が実行時に pkg_resources を import する。
+    # pkg_resources は setuptools 81 以降のデフォルト配布から外れたため、
+    # まだ同梱している最終系列にピン留めする。
+    "setuptools<81",
 ]
 
 [tool.uv]
 package = false
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cpu", marker = "sys_platform != 'darwin'" },
+]

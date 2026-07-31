@@ -2,6 +2,10 @@
 
 共有 t0 で録音した2トラックのため、start をそのまま比較して
 時系列に並べられる。source→話者ラベルは 自分 / 相手・参加者。
+タブ音声（others）は `diarize.diarize_track` により `speaker_id` を
+持ち得る。2人以上のクラスタが検出された場合、`speaker_id` は
+「相手・参加者N」という番号ラベルに展開され、`speaker_names` を渡すことで
+任意の表示名（実名リネーム）にも展開できる。
 """
 
 from __future__ import annotations
@@ -26,30 +30,52 @@ def _fmt_ts(seconds: float) -> str:
     return f"{m:02d}:{s:02d}"
 
 
+def _label_for(seg: dict, speaker_names: dict[str, str] | None = None) -> str:
+    """セグメントの表示ラベルを決める。
+
+    others かつ speaker_id が確定している場合は「相手・参加者N」（または
+    speaker_names 指定時はその表示名）、それ以外は SOURCE_LABELS のフォール
+    バックを返す。
+    """
+    if seg["source"] == "others" and seg.get("speaker_id") is not None:
+        key = str(seg["speaker_id"])
+        if speaker_names and key in speaker_names:
+            return speaker_names[key]
+        return f"相手・参加者{seg['speaker_id']}"
+    return SOURCE_LABELS.get(seg["source"], seg["source"])
+
+
 def merge_segments(segments: list[dict]) -> list[dict]:
     """start 昇順にソートしたセグメントのリストを返す。"""
     return sorted(segments, key=lambda s: (s["start"], s.get("source", "")))
 
 
-def to_transcript_md(segments: list[dict]) -> str:
+def to_transcript_md(
+    segments: list[dict], speaker_names: dict[str, str] | None = None
+) -> str:
     """マージ済セグメントをタイムスタンプ＋話者ラベル付き Markdown に整形する。"""
     lines = ["# トランスクリプト", ""]
     for seg in segments:
-        label = SOURCE_LABELS.get(seg["source"], seg["source"])
+        label = _label_for(seg, speaker_names)
         ts = _fmt_ts(seg["start"])
         lines.append(f"[{ts}] {label}: {seg['text']}")
     lines.append("")
     return "\n".join(lines)
 
 
-def write_outputs(segments: list[dict], workspace: Path) -> dict:
+def write_outputs(
+    segments: list[dict],
+    workspace: Path,
+    speaker_names: dict[str, str] | None = None,
+) -> dict:
     """transcript.md と transcript.json を書き出し、パスを返す。
 
-    transcript.json は生セグメント（両トラック）を保持し、別プロバイダでの
-    議事録再生成時に再文字起こしを不要にする。
+    transcript.json には常に生の speaker_id（int/None）を保存し、表示名は
+    保存しない。これにより、リネーム後は再文字起こしせず transcript.json
+    から transcript.md を再生成できる。
     """
     merged = merge_segments(segments)
-    md = to_transcript_md(merged)
+    md = to_transcript_md(merged, speaker_names)
 
     md_path = workspace / "transcript.md"
     json_path = workspace / "transcript.json"

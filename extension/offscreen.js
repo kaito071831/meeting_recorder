@@ -22,6 +22,15 @@ let mixCtx = null; // 録画用ミックスの AudioContext（stop で close）
 let playbackCtx = null; // タブ音声の再生維持用 AudioContext（stop で close）
 let backend = "http://localhost:8000";
 let meta = { title: "", provider: "claude", model: "" };
+let micStream = null;
+
+// マイクのミュート切替: track.enabled で無効化するだけなのでレコーダーは
+// 止めず、ミュート中は無音（タブ音声とのタイムラインもずれない）として録音され続ける。
+function setMicMuted(muted) {
+  if (micStream) {
+    micStream.getAudioTracks().forEach((t) => (t.enabled = !muted));
+  }
+}
 
 function pickMime() {
   const prefer = "audio/webm;codecs=opus";
@@ -87,7 +96,6 @@ async function startRecording(streamId, meetingMeta, backendUrl) {
   const tabStream = new MediaStream(tabAudioTracks);
 
   // マイク（自分）
-  let micStream;
   try {
     micStream = await navigator.mediaDevices.getUserMedia({
       audio: {
@@ -206,6 +214,7 @@ async function stopRecording() {
     playbackCtx.close().catch(() => {});
     playbackCtx = null;
   }
+  micStream = null;
 
   const micBlob = new Blob(chunks.mic, { type: "audio/webm" });
   const tabBlob = new Blob(chunks.tab, { type: "audio/webm" });
@@ -299,6 +308,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
   if (msg.type === "offscreen_stop") {
     stopRecording();
+    sendResponse({ ok: true });
+    return true;
+  }
+  if (msg.type === "offscreen_set_mic_muted") {
+    setMicMuted(!!msg.muted);
     sendResponse({ ok: true });
     return true;
   }

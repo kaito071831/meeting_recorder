@@ -13,6 +13,7 @@ const els = {
   model: document.getElementById("model"),
   start: document.getElementById("start"),
   stop: document.getElementById("stop"),
+  muteMic: document.getElementById("mute-mic"),
   timer: document.getElementById("timer"),
   statusList: document.getElementById("status-list"),
   resultCard: document.getElementById("result-card"),
@@ -23,6 +24,11 @@ const els = {
   permNote: document.getElementById("perm-note"),
   openPermission: document.getElementById("open-permission"),
   forceReset: document.getElementById("force-reset"),
+  editSpeakers: document.getElementById("edit-speakers"),
+  speakerRenameForm: document.getElementById("speaker-rename-form"),
+  speakerInputs: document.getElementById("speaker-inputs"),
+  saveSpeakers: document.getElementById("save-speakers"),
+  cancelSpeakers: document.getElementById("cancel-speakers"),
 };
 
 // ── 進捗ラベル（capture.js と同一）────────────────────────
@@ -30,6 +36,7 @@ const STAGE_LABELS = {
   uploaded: "アップロード完了",
   transcribing_mic: "文字起こし中（自分／マイク）",
   transcribing_tab: "文字起こし中（相手・参加者／タブ音声）",
+  diarizing: "話者を分離中",
   merging: "時系列マージ中",
   generating_minutes: "議事録を生成中",
   done: "完了",
@@ -102,6 +109,19 @@ els.openPermission.addEventListener("click", (e) => {
 let timerId = null;
 let currentMeetingId = null;
 let hasScreen = false;
+let detectedSpeakerNumbers = [];
+
+// トランスクリプトの行頭ラベルから「相手・参加者N」の番号を抽出する
+// （capture.js と同一ロジック。話者分離が2人以上検出したときだけ現れる）。
+function detectSpeakerNumbers(transcriptMd) {
+  const re = /^\[[^\]]+\]\s+相手・参加者(\d+):/gm;
+  const numbers = new Set();
+  let m;
+  while ((m = re.exec(transcriptMd)) !== null) {
+    numbers.add(Number(m[1]));
+  }
+  return [...numbers].sort((a, b) => a - b);
+}
 
 function startTimerFrom(startedAt) {
   stopTimer();
@@ -146,17 +166,24 @@ function render(state) {
   if (state.status === "recording") {
     els.start.disabled = true;
     els.stop.disabled = false;
+    els.muteMic.disabled = false;
     startTimerFrom(state.startedAt || Date.now());
   } else if (state.status === "processing") {
     els.start.disabled = true;
     els.stop.disabled = true;
+    els.muteMic.disabled = true;
     stopTimer();
   } else {
     // idle / done / error
     els.start.disabled = els.provider.value === "" ? true : false;
     els.stop.disabled = true;
+    els.muteMic.disabled = true;
     stopTimer();
   }
+
+  // マイクミュート表示
+  els.muteMic.textContent = state.micMuted ? "🎤 ミュート解除" : "🎤 ミュート";
+  els.muteMic.classList.toggle("active", !!state.micMuted);
 
   // フォーム値の復元（録音・処理中はユーザーが触れないので同期）
   if (state.status === "recording" || state.status === "processing") {
@@ -177,9 +204,12 @@ function render(state) {
     } else {
       els.downloadScreen.hidden = true;
     }
+    detectedSpeakerNumbers = detectSpeakerNumbers(state.transcriptMd || "");
+    if (els.editSpeakers) els.editSpeakers.hidden = detectedSpeakerNumbers.length < 2;
     els.resultCard.hidden = false;
   } else {
     els.resultCard.hidden = true;
+    if (els.speakerRenameForm) els.speakerRenameForm.hidden = true;
   }
 }
 
@@ -220,6 +250,12 @@ els.stop.addEventListener("click", async () => {
   await sendBg("stop");
 });
 
+els.muteMic.addEventListener("click", async () => {
+  els.muteMic.disabled = true;
+  await sendBg("toggle_mic_mute");
+  els.muteMic.disabled = false;
+});
+
 els.forceReset.addEventListener("click", async (e) => {
   e.preventDefault();
   if (!confirm("進捗をリセットします。録音中・処理中の音声や結果は失われます。よろしいですか？")) {
@@ -250,6 +286,77 @@ els.downloadTranscript.addEventListener("click", async () => {
   const data = await resp.json();
   download("transcript.md", data.transcript_md);
 });
+
+// ── 話者名のリネーム ──────────────────────────────────────
+async function buildSpeakerInputs() {
+  els.speakerInputs.innerHTML = "";
+  let existing = {};
+  if (currentMeetingId) {
+    try {
+      const resp = await fetch(`${BACKEND}/api/meetings/${currentMeetingId}/speakers`);
+      if (resp.ok) existing = await resp.json();
+    } catch (e) {
+      /* 取得失敗時は空欄のまま表示 */
+    }
+  }
+  for (const n of detectedSpeakerNumbers) {
+    const field = document.createElement("div");
+    field.className = "field";
+    const label = document.createElement("label");
+    label.textContent = `相手・参加者${n}`;
+    label.setAttribute("for", `speaker-input-${n}`);
+    const input = document.createElement("input");
+    input.type = "text";
+    input.id = `speaker-input-${n}`;
+    input.placeholder = `相手・参加者${n}`;
+    input.value = existing[String(n)] || "";
+    field.appendChild(label);
+    field.appendChild(input);
+    els.speakerInputs.appendChild(field);
+  }
+}
+
+if (els.editSpeakers) {
+  els.editSpeakers.addEventListener("click", async () => {
+    const opening = els.speakerRenameForm.hidden;
+    if (opening) await buildSpeakerInputs();
+    els.speakerRenameForm.hidden = !opening;
+  });
+}
+
+if (els.cancelSpeakers) {
+  els.cancelSpeakers.addEventListener("click", () => {
+    els.speakerRenameForm.hidden = true;
+  });
+}
+
+if (els.saveSpeakers) {
+  els.saveSpeakers.addEventListener("click", async () => {
+    if (!currentMeetingId) return;
+    const mapping = {};
+    for (const n of detectedSpeakerNumbers) {
+      const input = document.getElementById(`speaker-input-${n}`);
+      const value = input ? input.value.trim() : "";
+      if (value) mapping[String(n)] = value;
+    }
+    els.saveSpeakers.disabled = true;
+    try {
+      const resp = await fetch(`${BACKEND}/api/meetings/${currentMeetingId}/speakers`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(mapping),
+      });
+      if (!resp.ok) throw new Error("保存に失敗しました");
+      const data = await resp.json();
+      els.minutesOutput.textContent = data.minutes_md;
+      els.speakerRenameForm.hidden = true;
+    } catch (e) {
+      alert(e.message || "話者名の保存に失敗しました");
+    } finally {
+      els.saveSpeakers.disabled = false;
+    }
+  });
+}
 
 // ── 初期化 ────────────────────────────────────────────────
 (async () => {

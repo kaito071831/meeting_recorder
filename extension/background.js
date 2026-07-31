@@ -14,10 +14,12 @@ const INITIAL_STATE = {
   title: "",
   provider: "",
   model: "",
+  micMuted: false,
   startedAt: 0, // 録音開始時刻（popup のタイマー復元用）
   meetingId: null,
   hasScreen: false,
   minutesMd: "",
+  transcriptMd: "",
   error: "",
   events: [], // SSE 由来の進捗イベント列（popup の進捗リスト復元用）
 };
@@ -107,10 +109,12 @@ async function startRecording(meta) {
     title: meta.title || "",
     provider: meta.provider || "",
     model: meta.model || "",
+    micMuted: false,
     startedAt: Date.now(),
     meetingId: null,
     hasScreen: false,
     minutesMd: "",
+    transcriptMd: "",
     error: "",
     events: [],
   });
@@ -157,6 +161,18 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           sendResponse({ ok: true });
           return;
         }
+        if (msg.type === "toggle_mic_mute") {
+          const state = await getState();
+          const muted = !state.micMuted;
+          await chrome.runtime.sendMessage({
+            target: "offscreen",
+            type: "offscreen_set_mic_muted",
+            muted,
+          });
+          await setState({ micMuted: muted });
+          sendResponse({ ok: true, micMuted: muted });
+          return;
+        }
         if (msg.type === "reset") {
           // 何らかの理由で処理が停止・応答不能になった場合の強制リセット。
           // offscreen document を破棄して状態を idle に戻す。
@@ -190,6 +206,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         if (msg.event.stage === "done") {
           patch.status = "done";
           patch.minutesMd = msg.event.minutes_md || "";
+          patch.transcriptMd = msg.event.transcript_md || "";
         } else if (msg.event.stage === "error") {
           patch.status = "error";
           patch.error = msg.event.message || "処理エラー";

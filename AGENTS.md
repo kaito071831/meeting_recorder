@@ -14,11 +14,18 @@
 
 ## 構成
 
-- `app.py` — 静的配信 + API（`/api/providers`, `/api/meetings`, `.../process`(SSE), `.../minutes`, `.../transcript`, `.../screen`）。拡張機能版（`chrome-extension://<id>`）からの fetch/SSE 用に CORS ミドルウェアを追加済み（`allow_origin_regex` で拡張オリジンと localhost を許可）。他のエンドポイント・処理は無変更。
-- `lib/config.py` — `.env.local` 読込・パス解決・プロバイダ設定
+- `app.py` — 静的配信 + API（`/api/providers`, `/api/meetings`, `.../process`(SSE), `.../minutes`, `.../transcript`, `.../screen`, `.../speakers`(GET/POST)）。拡張機能版（`chrome-extension://<id>`）からの fetch/SSE 用に CORS ミドルウェアを追加済み（`allow_origin_regex` で拡張オリジンと localhost を許可）。`.../process` のトラックループで tab 側のみ文字起こし後に `diarize.diarize_track` を呼び `"diarizing"` ステージを発火する（mic 側は無変更）。
+- `lib/config.py` — `.env.local` 読込・パス解決・プロバイダ設定・話者分離設定
 - `lib/transcribe.py` — faster-whisper ラッパ（トラック別・逐次・モデル再利用）
-- `lib/merge.py` — 時系列マージ + 話者ラベル（自分 / 相手・参加者）
-- `lib/minutes.py` — プロンプト組立（要約 / 決定事項 / ToDo表）+ 生成オーケストレーション
+- `lib/diarize.py` — タブ音声内の複数話者分離（resemblyzer 埋め込み +
+  `AgglomerativeClustering`、コサイン距離・`distance_threshold` で話者数自動推定）。
+  無効化・データ不足・例外はすべて `speaker_id=None`（既存の単一ラベル表示）へ
+  フォールバックし、例外はモジュール内で握り込む。
+- `lib/merge.py` — 時系列マージ + 話者ラベル（自分 / 相手・参加者、タブ音声は
+  `speaker_id` に応じて「相手・参加者N」や任意リネーム後の実名に展開）
+- `lib/minutes.py` — プロンプト組立（議題 / 要約 / 議事録 / 決定事項 / ToDo表 / 次回予定）+
+  生成オーケストレーション。`## 議事録` での話者帰属可否はトランスクリプト中の
+  非自分ラベルの種類数で自動分岐する。
 - `lib/providers/` — `MinutesProvider` ABC + `claude.py` / `ollama.py` + ファクトリ
 - `lib/storage.py` — 会議ごとの出力パス命名・保存（Windows 禁止文字を除去）
 - `static/` — キャプチャUI（`getDisplayMedia`＋`getUserMedia` の2トラック音声録音
@@ -66,7 +73,13 @@
 ## 技術的前提
 
 - ffmpeg CLI は不要。faster-whisper は PyAV（`av`、ffmpeg ライブラリ同梱 wheel）で
-  WebM/Opus をデコードするため PATH 上の ffmpeg に依存しない。
+  WebM/Opus をデコードするため PATH 上の ffmpeg に依存しない。`lib/diarize.py` も
+  同じ無依存経路（`faster_whisper.audio.decode_audio`）でタブ音声全体をデコードし、
+  話者分離用の音声取得のために ffmpeg CLI や別デコーダを追加していない。
+- `torch` が無制約で `setuptools` を要求するため、`resemblyzer` の依存
+  `webrtcvad` が実行時 import する `pkg_resources` が setuptools 81 以降で
+  同梱されなくなった問題を回避するため `pyproject.toml` で `setuptools<81` を
+  明示的にピン留めしている。
 
 ## 開発コマンド
 

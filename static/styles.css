@@ -103,6 +103,12 @@ button.danger {
   border-color: var(--danger);
 }
 
+button.toggle.active {
+  background: #fef3c7;
+  color: #92400e;
+  border-color: #f59e0b;
+}
+
 /* ボタンと同じ見た目のダウンロードリンク（録画DL用） */
 .button-link {
   display: inline-block;
@@ -190,6 +196,10 @@ button.danger {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.speaker-inputs {
+  margin-top: 8px;
 }
 
 .output {

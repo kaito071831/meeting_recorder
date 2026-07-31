@@ -39,6 +39,7 @@
         <div class="controls">
           <button id="start" class="primary">録音開始</button>
           <button id="stop" class="danger" disabled>停止して処理</button>
+          <button id="mute-mic" class="toggle" disabled>🎤 ミュート</button>
           <span id="timer" class="timer">00:00</span>
         </div>
       </section>
@@ -60,9 +61,23 @@
             <button id="download-minutes">議事録DL</button>
             <button id="download-transcript">全文DL</button>
             <a id="download-screen" class="button-link" download hidden>録画DL</a>
+            <button id="edit-speakers" class="toggle" hidden>話者名を編集</button>
           </div>
         </div>
         <pre id="minutes-output" class="output"></pre>
+      </section>
+
+      <section class="card" id="speaker-rename-form" hidden>
+        <h2>話者名を編集</h2>
+        <p class="note">
+          タブ音声から自動分離した話者番号に、任意の実名を割り当てられます。
+          空欄のままなら既定の番号表示のままになります。
+        </p>
+        <div id="speaker-inputs" class="speaker-inputs"></div>
+        <div class="controls">
+          <button id="save-speakers" class="primary">保存</button>
+          <button id="cancel-speakers" class="toggle">キャンセル</button>
+        </div>
       </section>
     </main>
 

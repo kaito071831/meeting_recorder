@@ -20,7 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from lib import config, merge, minutes, storage, transcribe
+from lib import config, diarize, merge, minutes, storage, transcribe
 from lib.providers import available_providers, get_provider
 
 config.ensure_dirs()
@@ -116,9 +116,13 @@ def _process_worker(meeting_id: str, q: "queue.Queue") -> None:
             def on_progress(src, info, _label=label):
                 q.put({"stage": f"transcribing_{_label}", "progress": info})
 
-            segments.extend(
-                transcribe.transcribe_track(audio, source, on_progress=on_progress)
+            track_segments = transcribe.transcribe_track(
+                audio, source, on_progress=on_progress
             )
+            if label == "tab":
+                emit("diarizing")
+                track_segments = diarize.diarize_track(audio, track_segments)
+            segments.extend(track_segments)
 
         # ── マージ ────────────────────────────────────────────
         emit("merging")
@@ -196,6 +200,49 @@ def get_screen(meeting_id: str) -> FileResponse:
         raise HTTPException(status_code=404, detail="screen.webm not found")
     return FileResponse(
         path, media_type="video/webm", filename="screen.webm"
+    )
+
+
+@app.get("/api/meetings/{meeting_id}/speakers")
+def get_speakers(meeting_id: str) -> JSONResponse:
+    """話者番号→表示名のリネーム設定を返す（未設定時は {}）。"""
+    if not storage.workspace_exists(meeting_id):
+        raise HTTPException(status_code=404, detail="meeting not found")
+    path = storage.workspace_path(meeting_id) / "speakers.json"
+    if not path.exists():
+        return JSONResponse({})
+    return JSONResponse(json.loads(path.read_text(encoding="utf-8")))
+
+
+@app.post("/api/meetings/{meeting_id}/speakers")
+def set_speakers(meeting_id: str, mapping: dict[str, str]) -> JSONResponse:
+    """話者番号→表示名のリネーム設定を保存し、transcript.md・minutes.md を再生成する。
+
+    再文字起こしは行わない（transcript.json の生セグメントから再構築する）。
+    """
+    if not storage.workspace_exists(meeting_id):
+        raise HTTPException(status_code=404, detail="meeting not found")
+    ws = storage.workspace_path(meeting_id)
+    transcript_json_path = ws / "transcript.json"
+    if not transcript_json_path.exists():
+        raise HTTPException(status_code=404, detail="transcript.json not found")
+
+    (ws / "speakers.json").write_text(
+        json.dumps(mapping, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+    segments = json.loads(transcript_json_path.read_text(encoding="utf-8"))
+    transcript_md = merge.to_transcript_md(segments, speaker_names=mapping)
+    (ws / "transcript.md").write_text(transcript_md, encoding="utf-8")
+
+    meta = json.loads((ws / "meeting.json").read_text(encoding="utf-8"))
+    provider = get_provider(meta.get("provider", "claude"), model=meta.get("model"))
+    result = minutes.generate_minutes(
+        provider, transcript_md, meta.get("title", ""), ws
+    )
+
+    return JSONResponse(
+        {"transcript_md": transcript_md, "minutes_md": result["minutes_md"]}
     )
 
 

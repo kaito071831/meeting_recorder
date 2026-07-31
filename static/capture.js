@@ -12,6 +12,7 @@ const els = {
   model: document.getElementById("model"),
   start: document.getElementById("start"),
   stop: document.getElementById("stop"),
+  muteMic: document.getElementById("mute-mic"),
   timer: document.getElementById("timer"),
   micLevel: document.getElementById("mic-level"),
   tabLevel: document.getElementById("tab-level"),
@@ -21,6 +22,11 @@ const els = {
   downloadMinutes: document.getElementById("download-minutes"),
   downloadTranscript: document.getElementById("download-transcript"),
   downloadScreen: document.getElementById("download-screen"),
+  editSpeakers: document.getElementById("edit-speakers"),
+  speakerRenameForm: document.getElementById("speaker-rename-form"),
+  speakerInputs: document.getElementById("speaker-inputs"),
+  saveSpeakers: document.getElementById("save-speakers"),
+  cancelSpeakers: document.getElementById("cancel-speakers"),
 };
 
 // ── 進捗表示 ──────────────────────────────────────────────
@@ -28,6 +34,7 @@ const STAGE_LABELS = {
   uploaded: "アップロード完了",
   transcribing_mic: "文字起こし中（自分／マイク）",
   transcribing_tab: "文字起こし中（相手・参加者／タブ音声）",
+  diarizing: "話者を分離中",
   merging: "時系列マージ中",
   generating_minutes: "議事録を生成中",
   done: "完了",
@@ -131,6 +138,22 @@ let meterStops = [];
 let mixCtx = null; // 録画用のミックス AudioContext（stop で close）
 let timerId = null;
 let startedAt = 0;
+let micStream = null;
+let micMuted = false;
+
+// マイクのミュート切替: track.enabled で無効化するだけなのでレコーダーは
+// 止めず、ミュート中は無音（レベルメーターも自動的に0）として録音され続ける。
+// タブ音声側のタイムラインとずれないようにするための方式。
+function setMicMuted(muted) {
+  micMuted = muted;
+  if (micStream) {
+    micStream.getAudioTracks().forEach((t) => (t.enabled = !muted));
+  }
+  els.muteMic.textContent = muted ? "🎤 ミュート解除" : "🎤 ミュート";
+  els.muteMic.classList.toggle("active", muted);
+}
+
+els.muteMic.addEventListener("click", () => setMicMuted(!micMuted));
 
 function pickMime() {
   const prefer = "audio/webm;codecs=opus";
@@ -197,7 +220,6 @@ async function start() {
   const tabStream = new MediaStream(tabAudioTracks);
 
   // マイク（自分）
-  let micStream;
   try {
     micStream = await navigator.mediaDevices.getUserMedia({
       audio: {
@@ -279,6 +301,8 @@ async function start() {
   startTimer();
   els.start.disabled = true;
   els.stop.disabled = false;
+  els.muteMic.disabled = false;
+  setMicMuted(false);
 }
 
 function stopAllRecorders() {
@@ -296,6 +320,7 @@ function stopAllRecorders() {
 
 async function stop() {
   els.stop.disabled = true;
+  els.muteMic.disabled = true;
   stopTimer();
   await stopAllRecorders();
 
@@ -306,6 +331,8 @@ async function stop() {
     mixCtx.close().catch(() => {});
     mixCtx = null;
   }
+  micStream = null;
+  setMicMuted(false);
 
   const micBlob = new Blob(chunks.mic, { type: "audio/webm" });
   const tabBlob = new Blob(chunks.tab, { type: "audio/webm" });
@@ -393,7 +420,8 @@ function handleEvent(ev) {
 
   if (stage === "done") {
     setStatus(stage, label, "done");
-    showResult(ev.minutes_md);
+    currentTranscriptMd = ev.transcript_md || "";
+    showResult(ev.minutes_md, detectSpeakerNumbers(currentTranscriptMd));
     return;
   }
 
@@ -407,7 +435,22 @@ function handleEvent(ev) {
 }
 
 // ── 結果表示・ダウンロード ────────────────────────────────
-function showResult(minutesMd) {
+let currentTranscriptMd = "";
+let detectedSpeakerNumbers = [];
+
+// トランスクリプトの行頭ラベルから「相手・参加者N」の番号を抽出する
+// （リネーム前提の番号ラベルのみ対象。話者分離が2人以上検出したときだけ現れる）。
+function detectSpeakerNumbers(transcriptMd) {
+  const re = /^\[[^\]]+\]\s+相手・参加者(\d+):/gm;
+  const numbers = new Set();
+  let m;
+  while ((m = re.exec(transcriptMd)) !== null) {
+    numbers.add(Number(m[1]));
+  }
+  return [...numbers].sort((a, b) => a - b);
+}
+
+function showResult(minutesMd, speakerNumbers) {
   els.minutesOutput.textContent = minutesMd;
   // 録画がある会議のみ「録画をダウンロード」を有効化（動画が大きいため
   // fetch でメモリに載せず、ブラウザのダウンロードに委ねる直リンク）。
@@ -419,7 +462,84 @@ function showResult(minutesMd) {
       els.downloadScreen.hidden = true;
     }
   }
+  detectedSpeakerNumbers = speakerNumbers || [];
+  if (els.editSpeakers) {
+    els.editSpeakers.hidden = detectedSpeakerNumbers.length < 2;
+  }
+  if (els.speakerRenameForm) els.speakerRenameForm.hidden = true;
   els.resultCard.hidden = false;
+}
+
+// ── 話者名のリネーム ──────────────────────────────────────
+async function buildSpeakerInputs() {
+  els.speakerInputs.innerHTML = "";
+  let existing = {};
+  if (currentMeetingId) {
+    try {
+      const resp = await fetch(`/api/meetings/${currentMeetingId}/speakers`);
+      if (resp.ok) existing = await resp.json();
+    } catch (e) {
+      /* 取得失敗時は空欄のまま表示 */
+    }
+  }
+  for (const n of detectedSpeakerNumbers) {
+    const field = document.createElement("div");
+    field.className = "field";
+    const label = document.createElement("label");
+    label.textContent = `相手・参加者${n}`;
+    label.setAttribute("for", `speaker-input-${n}`);
+    const input = document.createElement("input");
+    input.type = "text";
+    input.id = `speaker-input-${n}`;
+    input.placeholder = `相手・参加者${n}`;
+    input.value = existing[String(n)] || "";
+    field.appendChild(label);
+    field.appendChild(input);
+    els.speakerInputs.appendChild(field);
+  }
+}
+
+if (els.editSpeakers) {
+  els.editSpeakers.addEventListener("click", async () => {
+    const opening = els.speakerRenameForm.hidden;
+    if (opening) await buildSpeakerInputs();
+    els.speakerRenameForm.hidden = !opening;
+  });
+}
+
+if (els.cancelSpeakers) {
+  els.cancelSpeakers.addEventListener("click", () => {
+    els.speakerRenameForm.hidden = true;
+  });
+}
+
+if (els.saveSpeakers) {
+  els.saveSpeakers.addEventListener("click", async () => {
+    if (!currentMeetingId) return;
+    const mapping = {};
+    for (const n of detectedSpeakerNumbers) {
+      const input = document.getElementById(`speaker-input-${n}`);
+      const value = input ? input.value.trim() : "";
+      if (value) mapping[String(n)] = value;
+    }
+    els.saveSpeakers.disabled = true;
+    try {
+      const resp = await fetch(`/api/meetings/${currentMeetingId}/speakers`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(mapping),
+      });
+      if (!resp.ok) throw new Error("保存に失敗しました");
+      const data = await resp.json();
+      currentTranscriptMd = data.transcript_md || currentTranscriptMd;
+      els.minutesOutput.textContent = data.minutes_md;
+      els.speakerRenameForm.hidden = true;
+    } catch (e) {
+      alert(e.message || "話者名の保存に失敗しました");
+    } finally {
+      els.saveSpeakers.disabled = false;
+    }
+  });
 }
 
 function download(filename, text) {

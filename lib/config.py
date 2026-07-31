@@ -74,3 +74,19 @@ def ollama_base_url() -> str:
 
 def ollama_default_model() -> str | None:
     return os.environ.get("OLLAMA_MODEL") or None
+
+
+# ── 話者分離設定 ──────────────────────────────────────────────
+def diarization_enabled() -> bool:
+    """タブ音声の話者分離を有効にするか。既定 True。"""
+    return os.environ.get("DIARIZATION_ENABLED", "1") != "0"
+
+
+def diarization_distance_threshold() -> float:
+    """AgglomerativeClustering の distance_threshold（cosine距離）。既定 0.15。
+
+    実会議2件（3〜9人相当のパネル/座談会形式）の tab.webm で実測した値。
+    0.4 では常に1クラスタに収束し分離されず、0.10〜0.15 の範囲で発話の
+    連続ブロック（同一話者が長く話す区間）と整合するクラスタが得られた。
+    """
+    return float(os.environ.get("DIARIZATION_DISTANCE_THRESHOLD", "0.15"))
