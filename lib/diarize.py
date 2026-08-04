@@ -11,10 +11,18 @@ resemblyzer の軽量話者埋め込み + `sklearn.cluster.AgglomerativeClusteri
 
 from __future__ import annotations
 
+import gc
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING, Union
 
 from . import config
+
+if TYPE_CHECKING:
+    import numpy as np
+
+# path または デコード済み ndarray（16kHz mono float32）を受け取れる。
+AudioInput = Union[Path, "np.ndarray"]
 
 logger = logging.getLogger(__name__)
 
@@ -38,12 +46,24 @@ def _get_encoder():
     return _encoder
 
 
+def release_encoder() -> None:
+    """キャッシュ済み VoiceEncoder を解放し RAM を返す。
+
+    話者分離完了後、ローカル議事録生成（Ollama）へ移る前に呼ぶことで
+    LLM とのピーク RAM 重複を避ける。次回の diarize_track で再ロードされる
+    ため冪等・安全。resemblyzer 未使用ビルドでも import 済みでなければ no-op。
+    """
+    global _encoder
+    _encoder = None
+    gc.collect()
+
+
 def _fallback(segments: list[dict]) -> list[dict]:
     """全セグメントに speaker_id=None を付与したコピーを返す。"""
     return [dict(seg, speaker_id=None) for seg in segments]
 
 
-def diarize_track(audio_path: Path, segments: list[dict]) -> list[dict]:
+def diarize_track(audio: AudioInput, segments: list[dict]) -> list[dict]:
     """タブ音声セグメントに speaker_id を付与して返す（元の dict は変更しない）。
 
     speaker_id は 2人以上のクラスタを検出できた場合のみ 1始まりの int、それ
@@ -51,19 +71,27 @@ def diarize_track(audio_path: Path, segments: list[dict]) -> list[dict]:
     None を返す。埋め込み計算をスキップした短い/無音セグメントには、時間的
     に最も近いラベル付きセグメントの speaker_id を割り当てる簡易ヒューリス
     ティックのため、発話の境界付近では誤帰属し得る。
+
+    `audio` は tab.webm 等のファイルパス、または既にデコード済みの ndarray
+    （16kHz mono float32）を受け取れる。ndarray を渡すと内部デコードを省く
+    ため、transcribe と音声を共有でき tab の二重デコードを避けられる。
     """
     try:
         if not config.diarization_enabled() or len(segments) < 2:
             return _fallback(segments)
 
         import numpy as np
-        from faster_whisper.audio import decode_audio
         from resemblyzer import preprocess_wav
         from sklearn.cluster import AgglomerativeClustering
 
-        wav = decode_audio(
-            str(audio_path), sampling_rate=_SAMPLE_RATE, split_stereo=False
-        )
+        if isinstance(audio, Path):
+            from faster_whisper.audio import decode_audio
+
+            wav = decode_audio(
+                str(audio), sampling_rate=_SAMPLE_RATE, split_stereo=False
+            )
+        else:
+            wav = audio
         encoder = _get_encoder()
 
         embeddings: list[np.ndarray] = []

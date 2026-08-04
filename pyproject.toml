@@ -15,6 +15,9 @@ dependencies = [
     "python-dotenv>=1.0",
     "resemblyzer>=0.1.4",
     "scikit-learn>=1.9",
+    # cross-platform に利用可能 RAM を取得しハード自動調整（モデル/batch/
+    # スレッド）に使う。
+    "psutil>=5.9",
     "torch>=2.13,<3",
     # torch が setuptools を無制約で要求するため 83.0.0 系に解決されがちだが、
     # webrtcvad（resemblyzer の依存）が実行時に pkg_resources を import する。

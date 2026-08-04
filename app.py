@@ -90,6 +90,32 @@ async def create_meeting(
     return JSONResponse({"meeting_id": meeting_id, "tracks": saved})
 
 
+# faster-whisper が内部デコードに用いるサンプルレート（diarize と共通）。
+_SAMPLE_RATE = 16000
+
+# ピーク正規化のヘッドルーム（0dBFS 直前でのクリップ・歪み回避のため少し下げる）。
+_NORMALIZE_PEAK = 0.97
+
+
+def _decode_normalized(audio_path):
+    """音声を 16kHz mono float32 にデコードしピーク正規化した ndarray を返す。
+
+    ffmpeg CLI 非依存の faster-whisper 同梱デコーダを使う（AGENTS.md 準拠）。
+    正規化はピーク基準＋ヘッドルームで、無音（全ゼロ）や取得失敗時は
+    元の波形をそのまま返し安全側に倒す。
+    """
+    import numpy as np
+    from faster_whisper.audio import decode_audio
+
+    wav = decode_audio(
+        str(audio_path), sampling_rate=_SAMPLE_RATE, split_stereo=False
+    )
+    peak = float(np.max(np.abs(wav))) if wav.size else 0.0
+    if peak > 0:
+        wav = (wav * (_NORMALIZE_PEAK / peak)).astype(np.float32)
+    return wav
+
+
 def _process_worker(meeting_id: str, q: "queue.Queue") -> None:
     """別スレッドで文字起こし〜議事録生成を実行し、進捗を queue に送る。"""
 
@@ -116,12 +142,22 @@ def _process_worker(meeting_id: str, q: "queue.Queue") -> None:
             def on_progress(src, info, _label=label):
                 q.put({"stage": f"transcribing_{_label}", "progress": info})
 
+            # tab は文字起こしと話者分離の両方で音声を使うため、一度だけ
+            # デコード＋ピーク正規化した ndarray を両処理に渡し二重デコードを
+            # 避ける（正規化は声の小さい参加者の取りこぼし低減が狙い）。
+            # mic は文字起こしのみのためパスのまま渡す。
+            audio_input = (
+                _decode_normalized(audio) if label == "tab" else audio
+            )
+
             track_segments = transcribe.transcribe_track(
-                audio, source, on_progress=on_progress
+                audio_input, source, on_progress=on_progress
             )
             if label == "tab":
                 emit("diarizing")
-                track_segments = diarize.diarize_track(audio, track_segments)
+                track_segments = diarize.diarize_track(
+                    audio_input, track_segments
+                )
             segments.extend(track_segments)
 
         # ── マージ ────────────────────────────────────────────
@@ -129,6 +165,14 @@ def _process_worker(meeting_id: str, q: "queue.Queue") -> None:
         merged = merge.write_outputs(segments, ws)
 
         # ── 議事録生成 ────────────────────────────────────────
+        # ローカル LLM（Ollama）は RAM を大きく使う（gemma で ~8.9GB）。
+        # Whisper（turbo ~6GB）と VoiceEncoder を先に解放し、ピーク RAM の
+        # 重複を避ける。Claude API 利用時はローカル LLM が載らずモデル
+        # 再利用のメリットが勝るため解放しない。
+        if provider_name == "ollama":
+            transcribe.release_model()
+            diarize.release_encoder()
+
         emit("generating_minutes")
         provider = get_provider(provider_name, model=model)
         result = minutes.generate_minutes(
